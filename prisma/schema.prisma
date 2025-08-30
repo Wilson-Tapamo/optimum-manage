@@ -1,0 +1,314 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// Énumération des rôles utilisateurs
+enum UserRole {
+  DIRECTEUR
+  CONSULTANT
+  CLIENT
+}
+
+// Énumération des statuts de projet
+enum ProjectStatus {
+  EN_ATTENTE
+  EN_COURS
+  EN_PAUSE
+  TERMINE
+  ANNULE
+}
+
+// Énumération des statuts de tâche
+enum TaskStatus {
+  A_FAIRE
+  EN_COURS
+  EN_REVISION
+  TERMINE
+  ANNULE
+}
+
+// Énumération des types de transaction
+enum TransactionType {
+  ENTREE
+  SORTIE
+}
+
+// Énumération des catégories de transaction
+enum TransactionCategory {
+  REVENUS_PROJET
+  SALAIRE_CONSULTANT
+  FRAIS_MATERIELS
+  FRAIS_DEPLACEMENT
+  FRAIS_FORMATION
+  AUTRES_ENTREES
+  AUTRES_SORTIES
+}
+
+// Énumération des priorités
+enum Priority {
+  BASSE
+  MOYENNE
+  HAUTE
+  URGENTE
+}
+
+// Énumération des types de notification
+enum NotificationType {
+  ASSIGNATION_TACHE
+  CHANGEMENT_STATUT
+  DEPASSEMENT_BUDGET
+  DEADLINE_PROCHE
+  COMMENTAIRE
+  NOUVEAU_DOCUMENT
+  PAIEMENT
+  AUTRE
+}
+
+// Modèle User - Utilisateurs du système
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String
+  firstName     String
+  lastName      String
+  phone         String?
+  avatar        String?
+  role          UserRole  @default(CONSULTANT)
+  isActive      Boolean   @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  consultant    Consultant?
+  projectsCreated Project[] @relation("ProjectCreator")
+  projectsManaged Project[] @relation("ProjectManager")
+  assignedTasks   Task[]
+  comments        Comment[]
+  notifications   Notification[]
+  documents       Document[]
+
+  @@map("users")
+}
+
+// Modèle Consultant - Profil détaillé des consultants
+model Consultant {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  tjm             Float     // Taux Journalier Moyen en FCFA
+  specialization  String    // Spécialisation principale
+  skills          Json      // Array de compétences ["React", "Node.js", etc.]
+  experience      Int       // Années d'expérience
+  cv              String?   // URL du CV
+  biography       String?   @db.Text
+  dateOfBirth     DateTime?
+  address         String?
+  emergencyContact String?
+  bankDetails     Json?     // Informations bancaires
+  isAvailable     Boolean   @default(true)
+  reliability     Float     @default(0) // Calculé : temps réel / temps estimé
+  totalProjects   Int       @default(0)
+  totalTasks      Int       @default(0)
+  averageRating   Float     @default(0)
+  joinedAt        DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions    Transaction[]
+
+  @@map("consultants")
+}
+
+// Modèle Project - Projets de l'entreprise
+model Project {
+  id              String        @id @default(cuid())
+  title           String
+  description     String        @db.Text
+  status          ProjectStatus @default(EN_ATTENTE)
+  priority        Priority      @default(MOYENNE)
+  budget          Float         // Budget total en FCFA
+  budgetUsed      Float         @default(0) // Budget utilisé en FCFA
+  estimatedHours  Int           // Heures estimées totales
+  actualHours     Int           @default(0) // Heures réelles passées
+  startDate       DateTime?
+  endDate         DateTime?
+  deadline        DateTime?
+  clientName      String?
+  clientEmail     String?
+  clientPhone     String?
+  creatorId       String
+  managerId       String?
+  isActive        Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  creator         User          @relation("ProjectCreator", fields: [creatorId], references: [id])
+  manager         User?         @relation("ProjectManager", fields: [managerId], references: [id])
+  tasks           Task[]
+  transactions    Transaction[]
+  comments        Comment[]
+  documents       Document[]
+
+  @@map("projects")
+}
+
+// Modèle Task - Tâches des projets
+model Task {
+  id              String      @id @default(cuid())
+  title           String
+  description     String      @db.Text
+  status          TaskStatus  @default(A_FAIRE)
+  priority        Priority    @default(MOYENNE)
+  budget          Float       @default(0) // Budget alloué à cette tâche
+  budgetUsed      Float       @default(0) // Budget utilisé pour cette tâche
+  estimatedHours  Int         // Heures estimées
+  actualHours     Int         @default(0) // Heures réellement passées
+  startDate       DateTime?
+  endDate         DateTime?
+  deadline        DateTime?
+  projectId       String
+  assignedUserId  String?
+  parentTaskId    String?     // Pour les sous-tâches
+  position        Int         @default(0) // Position dans le kanban
+  isActive        Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Relations
+  project         Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignedUser    User?       @relation(fields: [assignedUserId], references: [id])
+  parentTask      Task?       @relation("TaskSubTasks", fields: [parentTaskId], references: [id])
+  subTasks        Task[]      @relation("TaskSubTasks")
+  comments        Comment[]
+  documents       Document[]
+
+  @@map("tasks")
+}
+
+// Modèle Transaction - Gestion financière
+model Transaction {
+  id            String              @id @default(cuid())
+  type          TransactionType
+  category      TransactionCategory
+  amount        Float               // Montant en FCFA
+  description   String
+  reference     String?             // Référence externe (facture, etc.)
+  projectId     String?
+  consultantId  String?
+  isRecurring   Boolean             @default(false)
+  recurringPeriod String?           // "monthly", "quarterly", etc.
+  dueDate       DateTime?
+  paidDate      DateTime?
+  isPaid        Boolean             @default(false)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  // Relations
+  project       Project?            @relation(fields: [projectId], references: [id])
+  consultant    Consultant?         @relation(fields: [consultantId], references: [id])
+
+  @@map("transactions")
+}
+
+// Modèle Notification - Système de notifications
+model Notification {
+  id          String           @id @default(cuid())
+  type        NotificationType
+  title       String
+  message     String           @db.Text
+  isRead      Boolean          @default(false)
+  userId      String
+  entityId    String?          // ID de l'entité concernée (projet, tâche, etc.)
+  entityType  String?          // Type d'entité ("project", "task", etc.)
+  actionUrl   String?          // URL d'action pour la notification
+  createdAt   DateTime         @default(now())
+  readAt      DateTime?
+
+  // Relations
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+// Modèle Comment - Commentaires sur projets et tâches
+model Comment {
+  id          String    @id @default(cuid())
+  content     String    @db.Text
+  userId      String
+  projectId   String?
+  taskId      String?
+  parentId    String?   // Pour les réponses aux commentaires
+  isEdited    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  user        User      @relation(fields: [userId], references: [id])
+  project     Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task        Task?     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  parent      Comment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies     Comment[] @relation("CommentReplies")
+
+  @@map("comments")
+}
+
+// Modèle Document - Gestion des fichiers attachés
+model Document {
+  id          String    @id @default(cuid())
+  filename    String
+  originalName String
+  fileType    String
+  fileSize    Int       // Taille en bytes
+  filePath    String    // Chemin vers le fichier
+  description String?
+  userId      String
+  projectId   String?
+  taskId      String?
+  isPublic    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  user        User      @relation(fields: [userId], references: [id])
+  project     Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task        Task?     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@map("documents")
+}
+
+// Modèle pour le suivi de l'historique des actions
+model ActivityLog {
+  id          String    @id @default(cuid())
+  userId      String
+  action      String    // "CREATE", "UPDATE", "DELETE"
+  entityType  String    // "project", "task", "user", etc.
+  entityId    String
+  oldValues   Json?     // Anciennes valeurs (pour UPDATE)
+  newValues   Json?     // Nouvelles valeurs
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime  @default(now())
+
+  @@map("activity_logs")
+}
+
+// Modèle pour les paramètres de l'application
+model AppSettings {
+  id          String    @id @default(cuid())
+  key         String    @unique
+  value       Json
+  description String?
+  isSystem    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("app_settings")
+}
